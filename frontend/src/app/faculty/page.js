@@ -1,146 +1,402 @@
 "use client";
-import React, { useState } from "react";
+
+import React, { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import Card from "@/components/Card";
 import Button from "@/components/Button";
-import Link from "next/link";
+
+const defaultRules = {
+	question_quota: 5,
+	max_marks: 50,
+	offTopicEnabled: true,
+	penalty_off_topic: -2,
+	duplicateEnabled: true,
+	penalty_duplicate: -5,
+	fixationEnabled: true,
+	penalty_fixation: -1,
+};
+
+function SoftToggle({ checked, onChange, label }) {
+	return (
+		<button
+			type="button"
+			onClick={() => onChange(!checked)}
+			className={`w-full rounded-xl border px-4 py-3 text-left transition ${
+				checked
+					? "border-emerald-500/40 bg-emerald-500/10"
+					: "border-slate-700 bg-slate-900/70"
+			}`}
+		>
+			<div className="flex items-center justify-between">
+				<span className="text-sm font-medium text-slate-200">{label}</span>
+				<span
+					className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+						checked ? "bg-emerald-500" : "bg-slate-600"
+					}`}
+				>
+					<span
+						className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${
+							checked ? "translate-x-5" : "translate-x-1"
+						}`}
+					/>
+				</span>
+			</div>
+		</button>
+	);
+}
 
 export default function FacultyPage() {
-  const [method, setMethod] = useState("pdf");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [success, setSuccess] = useState(false);
-  const [files, setFiles] = useState([]);
-  const [url, setUrl] = useState("");
+	const [isProcessing, setIsProcessing] = useState(false);
+	const [isLoadingTests, setIsLoadingTests] = useState(false);
+	const [showRules, setShowRules] = useState(false);
+	const [success, setSuccess] = useState(false);
+	const [error, setError] = useState("");
+	const [copied, setCopied] = useState(false);
+	const [ingestResult, setIngestResult] = useState(null);
+	const [tests, setTests] = useState([]);
+	const [file, setFile] = useState(null);
+	const fileInputRef = useRef(null);
+	const [subjectName, setSubjectName] = useState("MECH 301");
+	const [rules, setRules] = useState(defaultRules);
 
-  const handleUpload = async (e) => {
-    e.preventDefault();
-    if (method === "pdf" && files.length === 0) {
-      alert("Please select at least one file first.");
-      return;
-    }
-    if (method === "url" && !url) {
-      alert("Please enter a url.");
-      return;
-    }
+	const updateRule = (key, value) => {
+		setRules((prev) => ({ ...prev, [key]: value }));
+	};
 
-    setIsProcessing(true);
-    setSuccess(false);
+	const removeSelectedFile = () => {
+		setFile(null);
+		if (fileInputRef.current) {
+			fileInputRef.current.value = "";
+		}
+	};
 
-    if (method === "pdf") {
-      try {
-        // Send files to the standard backend ingestion endpoint
-        const uploadPromises = files.map(file => {
-          const formData = new FormData();
-          formData.append("file", file);
-  
-          return fetch("http://127.0.0.1:8000/api/v1/ingestion/pdf", {
-            method: "POST",
-            body: formData,
-          }).then(res => res.json());
-        });
-        await Promise.all(uploadPromises);
-        setSuccess(true);
-        setFiles([]);
-      } catch (error) {
-        alert("Failed to upload the file(s).");
-      } finally {
-        setIsProcessing(false);
-      }
-    } else {
-      // Mock API Call delay for URL
-      setTimeout(() => {
-        setIsProcessing(false);
-        setSuccess(true);
-      }, 2000);
-    }
-  };
+	const fetchCreatedTests = async () => {
+		setIsLoadingTests(true);
+		try {
+			let response = null;
+			try {
+				response = await fetch("http://127.0.0.1:8000/api/ingest/tests");
+			} catch {
+				response = await fetch("http://localhost:8000/api/ingest/tests");
+			}
 
-  return (
-    <div className="min-h-screen p-6 md:p-12 flex flex-col items-center">
-      <div className="w-full max-w-4xl flex items-center justify-between mb-8">
-        <h1 className="text-3xl font-bold">Faculty Portal</h1>
-        <Link href="/" className="text-sm text-slate-400 hover:text-white transition-colors">
-          ← Back to Home
-        </Link>
-      </div>
+			if (!response.ok) {
+				throw new Error("Failed to fetch tests");
+			}
 
-      <Card className="w-full max-w-4xl">
-        <div className="mb-6">
-          <h2 className="text-xl font-semibold mb-2">Ingest Context Material</h2>
-          <p className="text-slate-400 text-sm">Upload course materials to the vector database. Small files go to Postgres, large files &gt;20k tokens will be stored in Qdrant.</p>
-        </div>
+			const data = await response.json();
+			setTests(data.tests || []);
+		} catch (err) {
+			console.error("Failed to fetch created tests", err);
+		} finally {
+			setIsLoadingTests(false);
+		}
+	};
 
-        <div className="flex gap-4 mb-6 border-b border-slate-700 pb-4">
-          <button
-            className={`pb-2 px-2 text-sm font-medium transition-all ${method === "pdf" ? "text-blue-400 border-b-2 border-blue-400" : "text-slate-500 hover:text-slate-300"}`}
-            onClick={() => setMethod("pdf")}
-          >
-            PDF Upload
-          </button>
-          <button
-            className={`pb-2 px-2 text-sm font-medium transition-all ${method === "url" ? "text-blue-400 border-b-2 border-blue-400" : "text-slate-500 hover:text-slate-300"}`}
-            onClick={() => setMethod("url")}
-          >
-            URL Import
-          </button>
-        </div>
+	useEffect(() => {
+		fetchCreatedTests();
+	}, []);
 
-        <form onSubmit={handleUpload} className="flex flex-col gap-6">
-          {method === "pdf" ? (
-            <div className="flex flex-col gap-4">
-              <label htmlFor="file-upload" className="border-2 border-dashed border-slate-600 rounded-xl p-12 flex flex-col items-center justify-center text-center hover:border-blue-500 hover:bg-slate-800/30 transition-colors cursor-pointer group">
-                <span className="text-4xl mb-4 opacity-50 group-hover:opacity-100 group-hover:text-blue-400 transition-all">📄</span>
-                <p className="font-medium mb-1">Click to upload or drag and drop</p>
-                <p className="text-xs text-slate-500">PDF documents up to 50MB</p>
-                <input id="file-upload" type="file" multiple accept=".pdf" className="hidden" onChange={(e) => setFiles((prev) => [...prev, ...Array.from(e.target.files)])} />
-              </label>
+	const handleSubmit = async (e) => {
+		e.preventDefault();
+		setError("");
+		setSuccess(false);
+		setCopied(false);
+		setIngestResult(null);
 
-              {files.length > 0 && (
-                <div className="bg-slate-900 rounded-xl p-4 border border-slate-700">
-                  <h4 className="text-sm font-medium text-slate-300 mb-2">Selected Files ({files.length})</h4>
-                  <ul className="space-y-2">
-                    {files.map((f, i) => (
-                      <li key={i} className="flex items-center justify-between text-sm bg-slate-800 p-2 rounded-lg">
-                        <span className="text-blue-400 truncate w-3/4">{f.name}</span>
-                        <button type="button" onClick={() => setFiles(files.filter((_, idx) => idx !== i))} className="text-slate-500 hover:text-red-400">✕</button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium text-slate-300">Target URL</label>
-              <input
-                type="url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://example.com/course-syllabus"
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
-                required
-              />
-            </div>
-          )}
+		if (!subjectName.trim()) {
+			setError("Subject name is required.");
+			return;
+		}
+		if (!file) {
+			setError("Please upload a PDF file.");
+			return;
+		}
 
-          <div className="flex justify-end mt-4">
-            <Button type="submit" disabled={isProcessing}>
-              {isProcessing ? "Processing & Embedding..." : "Ingest Material"}
-            </Button>
-          </div>
-        </form>
+		setIsProcessing(true);
 
-        {/* Mock success UI */}
-        {success && (
-          <div className="mt-6 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2">
-            <div className="flex items-center gap-2 text-emerald-400 font-medium">
-              <span>✓</span> Successfully ingested and indexed
-            </div>
-            <p className="text-sm text-slate-400 ml-6">
-              Files are now active in the vector database and ready for query matching.
-            </p>
-          </div>
-        )}
-      </Card>
-    </div>
-  );
+		try {
+			const formData = new FormData();
+			formData.append("file", file);
+			formData.append("faculty_name", "Faculty Demo");
+			formData.append("subject_name", subjectName.trim());
+			formData.append("question_quota", String(Math.max(1, Number(rules.question_quota) || 5)));
+			formData.append("max_marks", String(Math.max(1, Number(rules.max_marks) || 50)));
+			formData.append(
+				"penalty_off_topic",
+				String(rules.offTopicEnabled ? (Number(rules.penalty_off_topic) || -2) : 0)
+			);
+			formData.append(
+				"penalty_duplicate",
+				String(rules.duplicateEnabled ? (Number(rules.penalty_duplicate) || -5) : 0)
+			);
+			formData.append(
+				"penalty_fixation",
+				String(rules.fixationEnabled ? (Number(rules.penalty_fixation) || -1) : 0)
+			);
+
+			const res = await fetch("http://127.0.0.1:8000/api/ingest", {
+				method: "POST",
+				body: formData,
+			});
+
+			const data = await res.json();
+			if (!res.ok) {
+				throw new Error(data?.detail || "Upload failed.");
+			}
+
+			setIngestResult(data);
+			setSuccess(true);
+			removeSelectedFile();
+			fetchCreatedTests();
+		} catch (err) {
+			setError(err.message || "Could not ingest file.");
+		} finally {
+			setIsProcessing(false);
+		}
+	};
+
+	const copyJoinCode = async () => {
+		if (!ingestResult?.test_id) {
+			return;
+		}
+		try {
+			await navigator.clipboard.writeText(ingestResult.test_id);
+			setCopied(true);
+			setTimeout(() => setCopied(false), 1800);
+		} catch {
+			setError("Unable to copy code. Please copy it manually.");
+		}
+	};
+
+	return (
+		<div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-6 md:p-12">
+			<div className="mx-auto w-full max-w-4xl">
+				<div className="mb-8 flex items-center justify-between">
+					<div>
+						<h1 className="text-3xl font-bold tracking-tight text-slate-100">Faculty Ingestion</h1>
+						<p className="mt-1 text-sm text-slate-400">Create a test and upload one source PDF.</p>
+					</div>
+					<Link href="/" className="text-sm text-slate-400 transition hover:text-slate-100">
+						Back to Home
+					</Link>
+				</div>
+
+				<Card className="border border-slate-800 bg-slate-900/70 shadow-2xl shadow-slate-950/40">
+					<form onSubmit={handleSubmit} className="space-y-6">
+						<div className="space-y-2">
+							<label className="text-sm font-medium text-slate-200">Subject Name</label>
+							<input
+								type="text"
+								value={subjectName}
+								onChange={(e) => setSubjectName(e.target.value)}
+								placeholder="MECH 301"
+								className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-500"
+								disabled={isProcessing}
+							/>
+						</div>
+
+						<div className="space-y-2">
+							<label className="text-sm font-medium text-slate-200">PDF Material</label>
+							<label
+								htmlFor="file-upload"
+								className="block cursor-pointer rounded-2xl border-2 border-dashed border-slate-700 bg-slate-950/50 p-10 text-center transition hover:border-cyan-500/60 hover:bg-slate-900"
+							>
+								<div className="mx-auto max-w-sm">
+									<p className="text-base font-medium text-slate-200">Drop PDF here or click to upload</p>
+									<p className="mt-1 text-xs text-slate-500">Single PDF, up to 50MB</p>
+								</div>
+								<input
+									id="file-upload"
+									ref={fileInputRef}
+									type="file"
+									accept=".pdf"
+									className="hidden"
+									onChange={(e) => setFile(e.target.files?.[0] || null)}
+									disabled={isProcessing}
+								/>
+							</label>
+							{file && (
+								<div className="flex items-center justify-between rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-200">
+									<span className="truncate pr-3">Selected: {file.name}</span>
+									<button
+										type="button"
+										onClick={removeSelectedFile}
+										disabled={isProcessing}
+										className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 transition hover:border-rose-400 hover:text-rose-300 disabled:opacity-50"
+									>
+										Remove
+									</button>
+								</div>
+							)}
+						</div>
+
+						<div className="rounded-2xl border border-slate-700 bg-slate-950/50">
+							<button
+								type="button"
+								onClick={() => setShowRules((s) => !s)}
+								className="flex w-full items-center justify-between px-4 py-3 text-left"
+							>
+								<div>
+									<p className="text-sm font-semibold text-slate-200">⚙️ Test Rules & Scoring (Defaults Applied)</p>
+									<p className="text-xs text-slate-500">Optional settings. Safe defaults are already enabled.</p>
+								</div>
+								<span className="text-slate-400">{showRules ? "Hide" : "Show"}</span>
+							</button>
+
+							{showRules && (
+								<div className="grid gap-4 border-t border-slate-800 p-4 md:grid-cols-2">
+									<div className="space-y-2">
+										<label className="text-xs font-medium uppercase tracking-wide text-slate-400">Question Quota</label>
+										<input
+											type="number"
+											min="1"
+											value={rules.question_quota}
+											onChange={(e) => updateRule("question_quota", e.target.value)}
+											className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-cyan-500"
+										/>
+									</div>
+
+									<div className="space-y-2">
+										<label className="text-xs font-medium uppercase tracking-wide text-slate-400">Maximum Marks</label>
+										<input
+											type="number"
+											min="1"
+											value={rules.max_marks}
+											onChange={(e) => updateRule("max_marks", e.target.value)}
+											className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-cyan-500"
+										/>
+									</div>
+
+									<div className="space-y-2 md:col-span-2">
+										<SoftToggle
+											checked={rules.offTopicEnabled}
+											onChange={(v) => updateRule("offTopicEnabled", v)}
+											label="Off-Topic Penalty"
+										/>
+										{rules.offTopicEnabled && (
+											<input
+												type="number"
+												value={rules.penalty_off_topic}
+												onChange={(e) => updateRule("penalty_off_topic", e.target.value)}
+												className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-cyan-500"
+											/>
+										)}
+									</div>
+
+									<div className="space-y-2 md:col-span-2">
+										<SoftToggle
+											checked={rules.duplicateEnabled}
+											onChange={(v) => updateRule("duplicateEnabled", v)}
+											label="Semantic Duplicate Penalty"
+										/>
+										{rules.duplicateEnabled && (
+											<input
+												type="number"
+												value={rules.penalty_duplicate}
+												onChange={(e) => updateRule("penalty_duplicate", e.target.value)}
+												className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-cyan-500"
+											/>
+										)}
+									</div>
+
+									<div className="space-y-2 md:col-span-2">
+										<SoftToggle
+											checked={rules.fixationEnabled}
+											onChange={(v) => updateRule("fixationEnabled", v)}
+											label="Topic Fixation Penalty"
+										/>
+										{rules.fixationEnabled && (
+											<input
+												type="number"
+												value={rules.penalty_fixation}
+												onChange={(e) => updateRule("penalty_fixation", e.target.value)}
+												className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-cyan-500"
+											/>
+										)}
+									</div>
+								</div>
+							)}
+						</div>
+
+						<div className="flex items-center justify-end gap-3">
+							<Button type="submit" disabled={isProcessing}>
+								<span className="inline-flex items-center gap-2">
+									{isProcessing && (
+										<span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-transparent" />
+									)}
+									{isProcessing ? "Chunking & Embedding..." : "Create Test"}
+								</span>
+							</Button>
+						</div>
+					</form>
+
+					{error && (
+						<div className="mt-5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+							{error}
+						</div>
+					)}
+
+					{success && ingestResult && (
+						<div className="mt-5 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-5 py-5">
+							<p className="text-sm font-semibold uppercase tracking-wide text-emerald-300">Test Created Successfully</p>
+							<p className="mt-3 text-xs text-slate-400">Test Join Code</p>
+							<div className="mt-2 flex items-center gap-3">
+								<p className="flex-1 break-all rounded-lg border border-emerald-500/40 bg-slate-950/70 px-4 py-3 font-mono text-lg text-emerald-200 md:text-xl">
+									{ingestResult.test_id}
+								</p>
+								<button
+									type="button"
+									onClick={copyJoinCode}
+									className="rounded-lg border border-emerald-500/40 px-3 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/20"
+								>
+									{copied ? "Copied" : "Copy to Clipboard"}
+								</button>
+							</div>
+							<p className="mt-3 text-sm text-slate-300">Share this code with your students to access this specific test.</p>
+						</div>
+					)}
+
+					<div className="mt-6 rounded-2xl border border-slate-700 bg-slate-950/50 p-4">
+						<div className="mb-3 flex items-center justify-between">
+							<h3 className="text-sm font-semibold text-slate-200">Previously Created Tests</h3>
+							<button
+								type="button"
+								onClick={fetchCreatedTests}
+								disabled={isLoadingTests}
+								className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 transition hover:border-cyan-500 hover:text-cyan-300 disabled:opacity-50"
+							>
+								{isLoadingTests ? "Refreshing..." : "Refresh"}
+							</button>
+						</div>
+
+						{tests.length === 0 ? (
+							<p className="text-sm text-slate-500">No tests created yet.</p>
+						) : (
+							<ul className="space-y-3">
+								{tests.map((test) => (
+									<li key={test.id} className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+										<p className="text-sm font-medium text-slate-100">{test.subject_name}</p>
+										<p className="mt-1 break-all text-xs text-slate-400">Test ID: {test.id}</p>
+										<p className="mt-2 text-xs font-medium uppercase tracking-wide text-slate-500">Files</p>
+										{test.materials && test.materials.length > 0 ? (
+											<ul className="mt-1 space-y-1">
+												{test.materials.map((material) => (
+													<li key={material.id} className="text-xs text-slate-300">
+														- {material.file_name}
+													</li>
+												))}
+											</ul>
+										) : (
+											<p className="mt-1 text-xs text-slate-500">No files attached.</p>
+										)}
+									</li>
+								))}
+							</ul>
+						)}
+					</div>
+				</Card>
+			</div>
+		</div>
+	);
 }

@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Curiosity Meter - FastAPI MVP"
-    API_V1_STR: str = "/api/v1"
+    API_V1_STR: str = "/api"
     
     # Database URIs
     POSTGRES_DB_URL: str = "postgresql://user:password@localhost:5432/curiosity_meter"

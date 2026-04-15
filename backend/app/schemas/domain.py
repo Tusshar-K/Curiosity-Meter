@@ -1,24 +1,69 @@
-from pydantic import BaseModel
-from typing import List, Optional, Any
+from typing import Optional
 
-class IngestionRequest(BaseModel):
-    content_type: str        # 'pdf' or 'url'
-    source: str              # URL or Base64/path
-    metadata: Optional[dict] = None
+from pydantic import BaseModel, Field
+
 
 class IngestionResponse(BaseModel):
     status: str
+    test_id: str
+    material_id: str
     token_count: int
-    storage: str             # 'postgres' or 'qdrant'
+    duplicate_material: bool
+
 
 class AssessmentRequest(BaseModel):
-    session_id: str
-    student_id: str
+    test_id: str
+    session_id: Optional[str] = None
+    student_name: str = Field(default="Student")
     question_text: str
 
-class AssessmentResponse(BaseModel):
+
+class SessionSummary(BaseModel):
     session_id: str
-    score: float
+    total_questions: int
+    question_quota: int
+    total_raw_score: float
+    final_clamped_score: float
+    status: str
+
+
+class StartSessionRequest(BaseModel):
+    student_name: str
+    test_id: str
+
+
+class SessionMaterialSummary(BaseModel):
+    id: str
+    file_name: str
+    token_count: int
+    topic_outline: list[str]
+
+
+class StartSessionResponse(BaseModel):
+    session_id: str
+    test_id: str
+    subject_name: str
+    question_quota: int
+    materials: list[SessionMaterialSummary]
+
+
+class SessionQuestionReportItem(BaseModel):
+    question_text: str
     feedback: str
-    is_duplicate: bool
-    duplicate_penalty: float
+    r_score: float
+    b_score: int
+    d_score: int
+    momentum_bonus: int
+    topic_fixation_penalty: int
+    penalties_applied: dict
+    final_question_score: float
+
+
+class SessionReportResponse(BaseModel):
+    session_id: str
+    subject_name: str
+    final_clamped_score: float
+    max_marks: int
+    total_questions: int
+    question_quota: int
+    questions: list[SessionQuestionReportItem]
