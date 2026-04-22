@@ -45,3 +45,7 @@ yarn-error.log*
 
 # Build artifacts
 build/
+
+# Debug/test scripts
+backend/test_key.py
+backend/test_key_output.txt

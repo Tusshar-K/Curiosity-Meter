@@ -68,12 +68,9 @@ export default function FacultyPage() {
 		setIsLoadingTests(true);
 		try {
 			let response = null;
-			try {
-				response = await fetch("http://127.0.0.1:8000/api/ingest/tests");
-			} catch {
-				response = await fetch("http://localhost:8000/api/ingest/tests");
-			}
-
+			
+			const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            response = await fetch(`${API_BASE}/api/ingest/tests`);		
 			if (!response.ok) {
 				throw new Error("Failed to fetch tests");
 			}
@@ -96,11 +93,8 @@ export default function FacultyPage() {
 		
 		try {
 			let response = null;
-			try {
-				response = await fetch(`http://127.0.0.1:8000/api/ingest/tests/${testId}`, { method: "DELETE" });
-			} catch {
-				response = await fetch(`http://localhost:8000/api/ingest/tests/${testId}`, { method: "DELETE" });
-			}
+			const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+			response = await fetch(`${API_BASE}/api/ingest/tests/${testId}`, { method: "DELETE" });
 			
 			if (!response.ok) {
 				throw new Error("Failed to delete test");
@@ -139,8 +133,8 @@ export default function FacultyPage() {
 			formData.append("question_quota", String(Math.max(1, Number(rules.question_quota) || 5)));
 			formData.append("max_marks", String(Math.max(1, Number(rules.max_marks) || 50)));
 
-
-			const res = await fetch("http://127.0.0.1:8000/api/ingest", {
+			const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+			const res = await fetch(`${API_BASE}/api/ingest`, {
 				method: "POST",
 				body: formData,
 			});

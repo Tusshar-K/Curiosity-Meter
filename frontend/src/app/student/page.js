@@ -14,18 +14,10 @@ import {
 import Card from "@/components/Card";
 import Button from "@/components/Button";
 
-const API_BASE_CANDIDATES = ["http://127.0.0.1:8000", "http://localhost:8000"];
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function fetchWithApiFallback(path, options = {}) {
-  let lastError = null;
-  for (const baseUrl of API_BASE_CANDIDATES) {
-    try {
-      return await fetch(`${baseUrl}${path}`, options);
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  throw lastError || new Error("Backend is not reachable");
+  return fetch(`${API_BASE}${path}`, options);
 }
 
 function SegmentedBar({ total, value, activeClass = "bg-cyan-500", baseClass = "bg-slate-800" }) {
