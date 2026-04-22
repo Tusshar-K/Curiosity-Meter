@@ -18,13 +18,37 @@ class AssessmentRequest(BaseModel):
     question_text: str
 
 
-class SessionSummary(BaseModel):
-    session_id: str
+class ScoreProgressionItem(BaseModel):
+    question_index: int
+    composite_score: float
+
+class SessionSummaryResponse(BaseModel):
+    avg_relevance: float
+    avg_bloom: float
+    avg_depth: float
+    total_bridging_bonuses: int
     total_questions: int
-    question_quota: int
-    total_raw_score: float
-    final_clamped_score: float
-    status: str
+    score_progression: list[ScoreProgressionItem]
+    archetype: str
+
+class SubmitQuestionScores(BaseModel):
+    relevance_r: float
+    bloom_b: int
+    depth_d: int
+    bridging_bonus: int
+    composite_score: float
+
+class SubmitQuestionSessionStats(BaseModel):
+    question_count: int
+    bridging_bonus_total: int
+    same_topic_streak: int
+    is_deepening: bool
+
+class SubmitQuestionResponse(BaseModel):
+    feedback: str
+    scores: Optional[SubmitQuestionScores] = None
+    scaffold_strategy: Optional[str] = None
+    session_stats: Optional[SubmitQuestionSessionStats] = None
 
 
 class StartSessionRequest(BaseModel):

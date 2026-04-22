@@ -27,6 +27,7 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 
 @app.on_event("startup")
 def startup_event():
+    # Triggering reload
     db_service.initialize_database()
 
 @app.get("/health")

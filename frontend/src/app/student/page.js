@@ -43,17 +43,7 @@ function SegmentedBar({ total, value, activeClass = "bg-cyan-500", baseClass = "
 
 function QuestionStatBlock({ item }) {
   const relevancePct = Math.round((item.scores?.relevance_r || 0) * 100);
-  const penalties = [];
 
-  if ((item.penalties_applied?.off_topic || 0) < 0) {
-    penalties.push("🚨 -2 Pts: Off-Topic");
-  }
-  if ((item.penalties_applied?.duplicate || 0) < 0) {
-    penalties.push("⚠️ -5 Pts: Semantic Duplicate");
-  }
-  if ((item.scores?.topic_fixation_penalty || 0) === -1) {
-    penalties.push("🛑 -1 Pt: Topic Fixation");
-  }
 
   return (
     <div className="mt-4 rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
@@ -89,19 +79,13 @@ function QuestionStatBlock({ item }) {
         </div>
       </div>
 
-      {item.scores?.momentum_bonus === 1 && (
+      {item.scores?.bridging_bonus === 1 && (
         <div className="mt-3 inline-flex items-center rounded-full border border-emerald-400/50 bg-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-200 animate-pulse">
-          🌟 +1 Momentum
+          🌟 +1 Bridging Bonus
         </div>
       )}
 
-      {penalties.length > 0 && (
-        <div className="mt-3 rounded-xl border border-rose-500/50 bg-rose-500/15 p-3 text-sm text-rose-200">
-          {penalties.map((p) => (
-            <p key={p}>{p}</p>
-          ))}
-        </div>
-      )}
+
     </div>
   );
 }
@@ -272,7 +256,7 @@ export default function StudentPage() {
     const currentQuestion = questionText.trim();
 
     try {
-      const response = await fetchWithApiFallback("/api/evaluate", {
+      const response = await fetchWithApiFallback("/api/submit-question", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -284,67 +268,30 @@ export default function StudentPage() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to connect to evaluation stream");
+        throw new Error("Failed to evaluate question");
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let buffer = "";
-      let currentEvent = null;
-      let finalResult = null;
-      let summaryPayload = null;
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.substring(7).trim();
-          } else if (line.startsWith("data: ")) {
-            const dataStr = line.substring(6).trim();
-            if (!dataStr) continue;
-
-            try {
-              const data = JSON.parse(dataStr);
-              if (currentEvent === "status") {
-                setStatusLine(data.message || "Processing...");
-              } else if (currentEvent === "feedback") {
-                setActiveStreamingFeedback(data.text || "");
-              } else if (currentEvent === "result") {
-                finalResult = data;
-              } else if (currentEvent === "summary") {
-                summaryPayload = data;
-              }
-            } catch {
-              // ignore incomplete JSON chunks
-            }
-          }
-        }
-      }
-
-      let newAskedCount = questionsAsked;
-      if (finalResult) {
-        newAskedCount = questionsAsked + 1;
-        setQuestionsAsked(newAskedCount);
-        setFeedbackCards((prev) => [
-          {
-            question: currentQuestion,
-            ...finalResult,
-          },
-          ...prev,
-        ]);
-      }
+      const data = await response.json();
+      
+      const newAskedCount = questionsAsked + 1;
+      setQuestionsAsked(newAskedCount);
+      
+      setFeedbackCards((prev) => [
+        {
+          question: currentQuestion,
+          question_score: data.scores?.composite_score,
+          scores: data.scores,
+          feedback: data.feedback,
+          scaffold_strategy: data.scaffold_strategy,
+          session_stats: data.session_stats
+        },
+        ...prev,
+      ]);
 
       setQuestionText("");
-      setActiveStreamingFeedback("");
       setStatusLine("Evaluation complete.");
 
-      if (summaryPayload || newAskedCount >= questionQuota) {
+      if (newAskedCount >= questionQuota) {
         await loadFinalReport(sessionId);
       }
     } catch (err) {
@@ -470,8 +417,7 @@ export default function StudentPage() {
                           relevance_r: q.r_score,
                           bloom_b: q.b_score,
                           depth_d: q.d_score,
-                          momentum_bonus: q.momentum_bonus,
-                          topic_fixation_penalty: q.topic_fixation_penalty,
+                          bridging_bonus: q.bridging_bonus,
                         },
                         penalties_applied: q.penalties_applied,
                       }}

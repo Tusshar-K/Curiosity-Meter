@@ -8,12 +8,6 @@ import Button from "@/components/Button";
 const defaultRules = {
 	question_quota: 5,
 	max_marks: 50,
-	offTopicEnabled: true,
-	penalty_off_topic: -2,
-	duplicateEnabled: true,
-	penalty_duplicate: -5,
-	fixationEnabled: true,
-	penalty_fixation: -1,
 };
 
 function SoftToggle({ checked, onChange, label }) {
@@ -97,6 +91,28 @@ export default function FacultyPage() {
 		fetchCreatedTests();
 	}, []);
 
+	const handleDeleteTest = async (testId) => {
+		if (!confirm("Are you sure you want to delete this test? All student sessions and grades will be lost.")) return;
+		
+		try {
+			let response = null;
+			try {
+				response = await fetch(`http://127.0.0.1:8000/api/ingest/tests/${testId}`, { method: "DELETE" });
+			} catch {
+				response = await fetch(`http://localhost:8000/api/ingest/tests/${testId}`, { method: "DELETE" });
+			}
+			
+			if (!response.ok) {
+				throw new Error("Failed to delete test");
+			}
+			
+			fetchCreatedTests();
+		} catch (err) {
+			console.error("Failed to delete test", err);
+			alert("Failed to delete test");
+		}
+	};
+
 	const handleSubmit = async (e) => {
 		e.preventDefault();
 		setError("");
@@ -122,18 +138,7 @@ export default function FacultyPage() {
 			formData.append("subject_name", subjectName.trim());
 			formData.append("question_quota", String(Math.max(1, Number(rules.question_quota) || 5)));
 			formData.append("max_marks", String(Math.max(1, Number(rules.max_marks) || 50)));
-			formData.append(
-				"penalty_off_topic",
-				String(rules.offTopicEnabled ? (Number(rules.penalty_off_topic) || -2) : 0)
-			);
-			formData.append(
-				"penalty_duplicate",
-				String(rules.duplicateEnabled ? (Number(rules.penalty_duplicate) || -5) : 0)
-			);
-			formData.append(
-				"penalty_fixation",
-				String(rules.fixationEnabled ? (Number(rules.penalty_fixation) || -1) : 0)
-			);
+
 
 			const res = await fetch("http://127.0.0.1:8000/api/ingest", {
 				method: "POST",
@@ -268,53 +273,7 @@ export default function FacultyPage() {
 										/>
 									</div>
 
-									<div className="space-y-2 md:col-span-2">
-										<SoftToggle
-											checked={rules.offTopicEnabled}
-											onChange={(v) => updateRule("offTopicEnabled", v)}
-											label="Off-Topic Penalty"
-										/>
-										{rules.offTopicEnabled && (
-											<input
-												type="number"
-												value={rules.penalty_off_topic}
-												onChange={(e) => updateRule("penalty_off_topic", e.target.value)}
-												className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-cyan-500"
-											/>
-										)}
-									</div>
 
-									<div className="space-y-2 md:col-span-2">
-										<SoftToggle
-											checked={rules.duplicateEnabled}
-											onChange={(v) => updateRule("duplicateEnabled", v)}
-											label="Semantic Duplicate Penalty"
-										/>
-										{rules.duplicateEnabled && (
-											<input
-												type="number"
-												value={rules.penalty_duplicate}
-												onChange={(e) => updateRule("penalty_duplicate", e.target.value)}
-												className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-cyan-500"
-											/>
-										)}
-									</div>
-
-									<div className="space-y-2 md:col-span-2">
-										<SoftToggle
-											checked={rules.fixationEnabled}
-											onChange={(v) => updateRule("fixationEnabled", v)}
-											label="Topic Fixation Penalty"
-										/>
-										{rules.fixationEnabled && (
-											<input
-												type="number"
-												value={rules.penalty_fixation}
-												onChange={(e) => updateRule("penalty_fixation", e.target.value)}
-												className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-cyan-500"
-											/>
-										)}
-									</div>
 								</div>
 							)}
 						</div>
@@ -375,8 +334,16 @@ export default function FacultyPage() {
 						) : (
 							<ul className="space-y-3">
 								{tests.map((test) => (
-									<li key={test.id} className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
-										<p className="text-sm font-medium text-slate-100">{test.subject_name}</p>
+									<li key={test.id} className="relative rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+										<div className="absolute right-3 top-3">
+											<button
+												onClick={() => handleDeleteTest(test.id)}
+												className="rounded-md border border-slate-600 px-2 py-1 text-xs text-rose-400 transition hover:bg-rose-500/10 hover:border-rose-400 focus:outline-none"
+											>
+												Remove
+											</button>
+										</div>
+										<p className="text-sm font-medium text-slate-100 pr-16">{test.subject_name}</p>
 										<p className="mt-1 break-all text-xs text-slate-400">Test ID: {test.id}</p>
 										<p className="mt-2 text-xs font-medium uppercase tracking-wide text-slate-500">Files</p>
 										{test.materials && test.materials.length > 0 ? (

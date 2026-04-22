@@ -144,19 +144,18 @@ async def ingest_pdf(
 
     content_hash = hashlib.sha256(full_text.encode("utf-8")).hexdigest()
     existing_material = db_service.get_material_by_hash(db, content_hash)
+    
+    skip_embedding = False
     if existing_material:
-        return IngestionResponse(
-            status="duplicate",
-            test_id=str(existing_material.test_id),
-            material_id=str(existing_material.id),
-            token_count=existing_material.token_count,
-            duplicate_material=True,
-        )
-
-    token_count = count_tokens(full_text)
-    chunks = chunk_text(full_text, chunk_size=500, overlap=50)
-    if not chunks:
-        raise HTTPException(status_code=400, detail="Unable to chunk the extracted text.")
+        skip_embedding = True
+        token_count = existing_material.token_count
+        topic_outline = existing_material.topic_outline
+    else:
+        token_count = count_tokens(full_text)
+        topic_outline = extract_topic_outline(full_text)
+        chunks = chunk_text(full_text, chunk_size=500, overlap=50)
+        if not chunks:
+            raise HTTPException(status_code=400, detail="Unable to chunk the extracted text.")
 
     test = db_service.get_or_create_test(
         db=db,
@@ -181,29 +180,32 @@ async def ingest_pdf(
         token_count=token_count,
     )
 
-    material.topic_outline = extract_topic_outline(full_text)
+    material.topic_outline = list(topic_outline) if isinstance(topic_outline, list) else []
     db.commit()
     db.refresh(material)
 
-    vectors = []
-    for chunk in chunks:
-        vectors.append(await llm_service.embed_text(chunk))
+    if not skip_embedding:
+        vectors = []
+        for chunk in chunks:
+            vectors.append(await llm_service.embed_text(chunk))
 
-    await db_service.store_chunk_vectors(
-        test_id=str(test.id),
-        material_id=str(material.id),
-        chunks=chunks,
-        vectors=vectors,
-        source=file.filename,
-    )
+        await db_service.store_chunk_vectors(
+            test_id=str(test.id),
+            material_id=str(material.id),
+            content_hash=content_hash,
+            chunks=chunks,
+            vectors=vectors,
+            source=file.filename,
+        )
+
     db_service.set_test_active(db, test)
 
     logger.info(
-        "Ingested material=%s test=%s chunks=%d tokens=%d",
+        "Ingested material=%s test=%s tokens=%d skipped_embedding=%s",
         material.id,
         test.id,
-        len(chunks),
         token_count,
+        skip_embedding
     )
 
     return IngestionResponse(
@@ -228,9 +230,9 @@ async def get_tests(db: Session = Depends(get_db)):
                 "config": {
                     "question_quota": t.config.question_quota if t.config else 5,
                     "max_marks": t.config.max_marks if t.config else 50,
-                    "penalty_off_topic": t.config.penalty_off_topic if t.config else -2,
-                    "penalty_duplicate": t.config.penalty_duplicate if t.config else -5,
-                    "penalty_fixation": t.config.penalty_fixation if t.config else -1,
+                    "penalty_off_topic": -2,
+                    "penalty_duplicate": -5,
+                    "penalty_fixation": -1,
                 },
                 "materials": [
                     {
@@ -245,3 +247,10 @@ async def get_tests(db: Session = Depends(get_db)):
             for t in tests
         ]
     }
+
+@router.delete("/ingest/tests/{test_id}")
+async def delete_test(test_id: str, db: Session = Depends(get_db)):
+    success = db_service.delete_test_and_vectors(db, test_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Test not found")
+    return {"status": "success", "message": "Test deleted successfully"}

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.domain import SessionMaterialSummary, SessionReportResponse, StartSessionRequest, StartSessionResponse
+from app.schemas.domain import SessionMaterialSummary, SessionSummaryResponse, StartSessionRequest, StartSessionResponse, SessionReportResponse
 from app.services.db_service import db_service
 
 router = APIRouter()
@@ -38,10 +38,20 @@ async def start_session(payload: StartSessionRequest, db: Session = Depends(get_
     )
 
 
-@router.get("/sessions/{session_id}/report", response_model=SessionReportResponse)
-async def get_session_report(session_id: str, db: Session = Depends(get_db)):
+@router.get("/session-summary/{session_id}", response_model=SessionSummaryResponse)
+async def get_session_summary(session_id: str, db: Session = Depends(get_db)):
     try:
-        report = db_service.get_session_report(db, session_id)
+        report = db_service.get_session_summary(db, session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return SessionSummaryResponse(**report)
+
+
+@router.get("/sessions/{session_id}/report", response_model=SessionReportResponse)
+async def get_legacy_session_report(session_id: str, db: Session = Depends(get_db)):
+    try:
+        report = await db_service.get_session_report(db, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
