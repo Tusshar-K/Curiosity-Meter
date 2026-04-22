@@ -12,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
     Numeric,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declarative_base
@@ -66,7 +67,7 @@ class TestMaterial(Base):
     # Part 2A: OpenAI vector store id for File Search
     vector_store_id = Column(String(64), nullable=True)
     # Part 2B Step 5: LLM-generated topic map for Give Up nudge
-    topic_map = Column(JSONB, nullable=True, server_default="'[]'::jsonb")
+    topic_map = Column(JSONB, nullable=True, server_default=text("'[]'::jsonb"))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     test = relationship("Test", back_populates="materials")
@@ -127,8 +128,8 @@ class GiveUpEvent(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id = Column(UUID(as_uuid=True), ForeignKey("student_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     student_id = Column(UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True)
-    covered_topics = Column(JSONB, nullable=False, server_default="'[]'::jsonb")
-    uncovered_topics = Column(JSONB, nullable=False, server_default="'[]'::jsonb")
+    covered_topics = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    uncovered_topics = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     nudge_text = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
