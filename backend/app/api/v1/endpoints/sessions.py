@@ -2,7 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.domain import SessionMaterialSummary, SessionSummaryResponse, StartSessionRequest, StartSessionResponse, SessionReportResponse
+from app.schemas.domain import (
+    GiveUpSummary,
+    ScoreProgressionItem,
+    SessionMaterialSummary,
+    SessionReportResponse,
+    SessionSummaryResponse,
+    StartSessionRequest,
+    StartSessionResponse,
+)
 from app.services.db_service import db_service
 
 router = APIRouter()
@@ -41,11 +49,22 @@ async def start_session(payload: StartSessionRequest, db: Session = Depends(get_
 @router.get("/session-summary/{session_id}", response_model=SessionSummaryResponse)
 async def get_session_summary(session_id: str, db: Session = Depends(get_db)):
     try:
-        report = db_service.get_session_summary(db, session_id)
+        report = await db_service.get_session_summary(db, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    return SessionSummaryResponse(**report)
+    return SessionSummaryResponse(
+        avg_relevance=report["avg_relevance"],
+        avg_bloom=report["avg_bloom"],
+        avg_depth=report["avg_depth"],
+        total_bridging_bonuses=report["total_bridging_bonuses"],
+        total_questions=report["total_questions"],
+        score_progression=[
+            ScoreProgressionItem(**item) for item in report["score_progression"]
+        ],
+        give_up_summary=GiveUpSummary(**report["give_up_summary"]),
+        archetype=report["archetype"],
+    )
 
 
 @router.get("/sessions/{session_id}/report", response_model=SessionReportResponse)

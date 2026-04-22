@@ -18,10 +18,20 @@ class AssessmentRequest(BaseModel):
     question_text: str
 
 
+# ── Score progression (Part 5D & 9) ──────────────────────────
 class ScoreProgressionItem(BaseModel):
     question_index: int
     composite_score: float
+    post_nudge: bool
 
+
+# ── Give Up summary (Part 9) ─────────────────────────────────
+class GiveUpSummary(BaseModel):
+    total_used: int
+    topics_never_explored: list[str]
+
+
+# ── Session summary response (Part 9) ────────────────────────
 class SessionSummaryResponse(BaseModel):
     avg_relevance: float
     avg_bloom: float
@@ -29,8 +39,11 @@ class SessionSummaryResponse(BaseModel):
     total_bridging_bonuses: int
     total_questions: int
     score_progression: list[ScoreProgressionItem]
+    give_up_summary: GiveUpSummary
     archetype: str
 
+
+# ── Submit-question response (Part 5B) ───────────────────────
 class SubmitQuestionScores(BaseModel):
     relevance_r: float
     bloom_b: int
@@ -38,11 +51,15 @@ class SubmitQuestionScores(BaseModel):
     bridging_bonus: int
     composite_score: float
 
+
 class SubmitQuestionSessionStats(BaseModel):
     question_count: int
     bridging_bonus_total: int
     same_topic_streak: int
     is_deepening: bool
+    give_up_available: bool
+    give_up_uses_remaining: int
+
 
 class SubmitQuestionResponse(BaseModel):
     feedback: str
@@ -51,6 +68,7 @@ class SubmitQuestionResponse(BaseModel):
     session_stats: Optional[SubmitQuestionSessionStats] = None
 
 
+# ── Session start ─────────────────────────────────────────────
 class StartSessionRequest(BaseModel):
     student_name: str
     test_id: str
@@ -71,6 +89,7 @@ class StartSessionResponse(BaseModel):
     materials: list[SessionMaterialSummary]
 
 
+# ── Legacy session report ─────────────────────────────────────
 class SessionQuestionReportItem(BaseModel):
     question_text: str
     feedback: str
@@ -91,3 +110,28 @@ class SessionReportResponse(BaseModel):
     total_questions: int
     question_quota: int
     questions: list[SessionQuestionReportItem]
+
+
+# ── Give Up endpoint (Part 5C) ────────────────────────────────
+class GiveUpRequest(BaseModel):
+    session_id: str
+    student_id: str
+
+
+class GiveUpSessionStats(BaseModel):
+    give_up_available: bool
+    give_up_uses_remaining: int
+    give_up_cooldown_questions: int
+
+
+class GiveUpResponse(BaseModel):
+    status: str
+    feedback: str
+    uses_remaining: int
+    session_stats: GiveUpSessionStats
+
+
+class GiveUpUnavailableResponse(BaseModel):
+    status: str
+    reason: str
+    feedback: str

@@ -1,8 +1,19 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, JSON, String, Text, Numeric
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
+    Numeric,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
@@ -33,7 +44,6 @@ class Student(Base):
     sessions = relationship("StudentSession", back_populates="student", cascade="all, delete-orphan")
 
 
-
 class TestConfig(Base):
     __tablename__ = "test_config"
 
@@ -53,6 +63,10 @@ class TestMaterial(Base):
     content_hash = Column(String(64), nullable=False, index=True)
     token_count = Column(Integer, nullable=False, default=0)
     topic_outline = Column(JSON, nullable=False, default=list)
+    # Part 2A: OpenAI vector store id for File Search
+    vector_store_id = Column(String(64), nullable=True)
+    # Part 2B Step 5: LLM-generated topic map for Give Up nudge
+    topic_map = Column(JSONB, nullable=True, server_default="'[]'::jsonb")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     test = relationship("Test", back_populates="materials")
@@ -64,15 +78,18 @@ class StudentSession(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     test_id = Column(UUID(as_uuid=True), ForeignKey("tests.id", ondelete="CASCADE"), nullable=False, index=True)
     student_id = Column(UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True)
-    student_name = Column(String(255), nullable=False) # Kept for backward compatibility if needed, but student_id is main
+    student_name = Column(String(255), nullable=False)
     total_raw_score = Column(Float, nullable=False, default=0.0)
     final_clamped_score = Column(Float, nullable=False, default=0.0)
     status = Column(String(20), nullable=False, default="active")
+    # Part 5A: question budget drives give_up_uses_remaining initialization
+    question_budget = Column(Integer, nullable=False, default=20)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     test = relationship("Test", back_populates="sessions")
     student = relationship("Student", back_populates="sessions")
     question_logs = relationship("Question", back_populates="session", cascade="all, delete-orphan")
+    give_up_events = relationship("GiveUpEvent", back_populates="session", cascade="all, delete-orphan")
 
 
 class Question(Base):
@@ -82,9 +99,9 @@ class Question(Base):
     session_id = Column(UUID(as_uuid=True), ForeignKey("student_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     student_id = Column(UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True)
     question_text = Column(Text, nullable=False)
-    dedup_status = Column(String(50), nullable=False, default="unique") # 'unique', 'escalation', 'duplicate'
-    relevance_r = Column(Float, nullable=True) # numeric(3,2) mapped to Float
-    bloom_b = Column(Integer, nullable=True) # smallint in postgres mapped to Integer
+    dedup_status = Column(String(50), nullable=False, default="unique")
+    relevance_r = Column(Float, nullable=True)
+    bloom_b = Column(Integer, nullable=True)
     depth_d = Column(Integer, nullable=True)
     bridging_bonus = Column(Integer, nullable=True)
     composite_score = Column(Numeric(4, 2), nullable=True)
@@ -93,8 +110,27 @@ class Question(Base):
     scaffold_strategy = Column(String(40), nullable=True)
     scaffold_parameters = Column(JSON, nullable=True, default=list)
     chain_of_thought = Column(JSON, nullable=True, default=dict)
+    # Part 5D: marks questions that followed a Give Up nudge
+    post_nudge = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     session = relationship("StudentSession", back_populates="question_logs")
     student = relationship("Student")
 
+
+class GiveUpEvent(Base):
+    """
+    Recorded each time a student uses the Give Up button (Part 5C step 8).
+    """
+    __tablename__ = "give_up_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("student_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    student_id = Column(UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True)
+    covered_topics = Column(JSONB, nullable=False, server_default="'[]'::jsonb")
+    uncovered_topics = Column(JSONB, nullable=False, server_default="'[]'::jsonb")
+    nudge_text = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    session = relationship("StudentSession", back_populates="give_up_events")
+    student = relationship("Student")

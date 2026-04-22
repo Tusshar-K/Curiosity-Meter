@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://localhost:6333"
     
     # API Keys
-    GEMINI_API_KEY: str = ""
+    OPENAI_API_KEY: str = ""
     
     class Config:
         case_sensitive = True
