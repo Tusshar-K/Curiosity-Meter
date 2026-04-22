@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     POSTGRES_DB_URL: str = "postgresql://user:password@localhost:5432/curiosity_meter"
     REDIS_URL: str = "redis://localhost:6379"
     QDRANT_URL: str = "http://localhost:6333"
+    QDRANT_API_KEY: str = ""
     
     # API Keys
     OPENAI_API_KEY: str = ""
