@@ -1,6 +1,5 @@
 import json
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -16,7 +15,6 @@ from app.schemas.domain import (
 from app.services.classifier import classify_duplicate
 from app.services.db_service import db_service
 from app.services.evaluator import call_evaluator
-from app.services.vector_store import retrieve_chunks
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -61,16 +59,24 @@ async def submit_question(req: AssessmentRequest, db: Session = Depends(get_db))
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     session_id_str = str(session.id)
+    test_id_str = str(session.test_id)
 
     # ── 2. Load Redis session state ───────────────────────────────────────
     question_budget = getattr(session, "question_budget", 20) or 20
-    session_state = await db_service.get_session_state(session_id_str, question_budget)
+    session_state = await db_service.get_session_state(
+        test_id=test_id_str,
+        session_id=session_id_str,
+        question_budget=question_budget,
+    )
     session_state["session_id"] = session_id_str
 
     # ── 3. Load question history for deduplication ────────────────────────
     past_questions = (
         db.query(Question)
-        .filter(Question.session_id == session.id)
+        .filter(
+            Question.session_id == session.id,
+            Question.dedup_status != "duplicate",
+        )
         .order_by(Question.created_at.asc())
         .all()
     )
@@ -140,22 +146,10 @@ async def submit_question(req: AssessmentRequest, db: Session = Depends(get_db))
             detail="Material has no vector store — please re-ingest the PDF.",
         )
 
-    # ── 7. File Search retrieval (Part 2C) — raw query, no enrichment ─────
-    contexts = await retrieve_chunks(
-        query=req.question_text,
-        vector_store_id=vector_store_id,
-    )
-    logger.info(
-        "Retrieved %d chunks for session=%s | previews: %s",
-        len(contexts),
-        session_id_str,
-        [c[:50] for c in contexts],
-    )
-
-    # ── 8. SKIP_BRIDGING_BONUS ────────────────────────────────────────────
+    # ── 7. SKIP_BRIDGING_BONUS ────────────────────────────────────────────
     skip_bridging_bonus = dedup_status == "escalation"
 
-    # ── 9. Build slim session state for evaluator LLM ────────────────────
+    # ── 8. Build slim session state for evaluator LLM ────────────────────
     slim_session_state = {
         "current_topic": session_state.get("current_topic", ""),
         "same_topic_streak": session_state.get("same_topic_streak", 0),
@@ -172,10 +166,10 @@ async def submit_question(req: AssessmentRequest, db: Session = Depends(get_db))
         json.dumps(slim_session_state),
     )
 
-    # ── 10. Evaluator call (Part 3) ───────────────────────────────────────
+    # ── 9. Evaluator call (Part 3 + retrieval) ────────────────────────────
     evaluator_output = await call_evaluator(
         student_question=req.question_text,
-        chunks=contexts,
+        vector_store_id=vector_store_id,
         session_state=slim_session_state,
         skip_bridging_bonus=skip_bridging_bonus,
     )
@@ -263,7 +257,11 @@ async def submit_question(req: AssessmentRequest, db: Session = Depends(get_db))
     # Final step of Redis update: recompute give_up_available (Part 5B)
     session_state = update_give_up_availability(session_state)
 
-    await db_service.update_session_state(session_id_str, session_state)
+    await db_service.update_session_state(
+        test_id=test_id_str,
+        session_id=session_id_str,
+        state=session_state,
+    )
 
     logger.info(
         "Submit complete | session=%s composite=%.2f give_up_available=%s uses_remaining=%d",

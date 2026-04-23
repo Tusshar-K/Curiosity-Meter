@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Question, TestMaterial
 from app.db.session import get_db
-from app.schemas.domain import GiveUpRequest, GiveUpResponse, GiveUpSessionStats, GiveUpUnavailableResponse
+from app.schemas.domain import GiveUpRequest, GiveUpResponse, GiveUpSessionStats
 from app.services.db_service import db_service
 from app.services.llm_client import client, NUDGE_MODEL
 
@@ -23,14 +23,29 @@ async def give_up(req: GiveUpRequest, db: Session = Depends(get_db)):
     session_id = req.session_id
     student_id = req.student_id
 
+    from app.db.models import StudentSession
+    import uuid
+
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session_id")
+
+    session_record = (
+        db.query(StudentSession)
+        .filter(StudentSession.id == session_uuid)
+        .first()
+    )
+    if not session_record:
+        raise HTTPException(status_code=404, detail="Session record not found")
+
+    test_id = str(session_record.test_id)
+
+    # Source of truth is the persisted session owner; tolerate stale client payloads.
+    student_id = str(session_record.student_id)
+
     # ── Step 1: Load session state from Redis ─────────────────────────────
-    key = f"session:{session_id}:state"
-    state = await db_service.get_session_state(session_id)
-    # Detect if key was truly absent (fresh default with no question_count activity)
-    raw = await db_service.redis.get(key)
-    if raw is None:
-        logger.warning("Give Up: session key missing for session_id=%s", session_id)
-        raise HTTPException(status_code=404, detail="Session state not found.")
+    state = await db_service.get_session_state(test_id=test_id, session_id=session_id)
 
     # ── Step 2: Validate availability ────────────────────────────────────
     give_up_available = state.get("give_up_available", False)
@@ -72,14 +87,6 @@ async def give_up(req: GiveUpRequest, db: Session = Depends(get_db)):
     logger.info("Give Up activated | session=%s", session_id)
 
     # ── Step 3: Load covered topics from PostgreSQL ───────────────────────
-    from sqlalchemy import text as sa_text
-    from app.db.models import StudentSession
-    import uuid
-
-    try:
-        session_uuid = uuid.UUID(session_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid session_id")
 
     covered_rows = (
         db.query(Question.current_topic)
@@ -97,14 +104,6 @@ async def give_up(req: GiveUpRequest, db: Session = Depends(get_db)):
     logger.info("Give Up: covered topics (%d): %s", len(covered), list(covered))
 
     # ── Step 4: Load document topic map from PostgreSQL ───────────────────
-    session_record = (
-        db.query(StudentSession)
-        .filter(StudentSession.id == session_uuid)
-        .first()
-    )
-    if not session_record:
-        raise HTTPException(status_code=404, detail="Session record not found")
-
     material = (
         db.query(TestMaterial)
         .filter(TestMaterial.test_id == session_record.test_id)
@@ -172,7 +171,11 @@ async def give_up(req: GiveUpRequest, db: Session = Depends(get_db)):
     state["give_up_cooldown_questions"] = 3
     state["give_up_available"] = False
     state["post_nudge_active"] = True  # Step 9: flag for next submission
-    await db_service.update_session_state(session_id, state)  # refreshes TTL to 7200s
+    await db_service.update_session_state(
+        test_id=test_id,
+        session_id=session_id,
+        state=state,
+    )  # refreshes TTL to 7200s
 
     new_uses_remaining = state["give_up_uses_remaining"]
 

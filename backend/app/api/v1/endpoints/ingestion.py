@@ -181,6 +181,7 @@ async def ingest_pdf(
     subject_name: str = Form(default="General"),
     question_quota: int = Form(default=5),
     max_marks: int = Form(default=50),
+    time_limit_minutes: int = Form(default=0),
     penalty_off_topic: int = Form(default=-2),
     penalty_duplicate: int = Form(default=-5),
     penalty_fixation: int = Form(default=-1),
@@ -245,6 +246,7 @@ async def ingest_pdf(
         penalty_off_topic=penalty_off_topic,
         penalty_duplicate=penalty_duplicate,
         penalty_fixation=penalty_fixation,
+        time_limit_minutes=time_limit_minutes if time_limit_minutes > 0 else None,
     )
     if existing_material:
         # Reuse the existing material record (covers both if and elif cases)
@@ -391,7 +393,7 @@ async def get_tests(db: Session = Depends(get_db)):
 
 @router.delete("/ingest/tests/{test_id}")
 async def delete_test(test_id: str, db: Session = Depends(get_db)):
-    success = db_service.delete_test_and_vectors(db, test_id)
+    success = await db_service.delete_test_and_vectors(db, test_id)
     if not success:
         raise HTTPException(status_code=404, detail="Test not found")
     return {"status": "success", "message": "Test deleted successfully"}

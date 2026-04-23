@@ -22,6 +22,9 @@ async def start_session(payload: StartSessionRequest, db: Session = Depends(get_
     if not test:
         raise HTTPException(status_code=404, detail="Test not found")
 
+    # Keep Redis session-state cache scoped to the active test only.
+    await db_service.refresh_session_cache_for_test(str(test.id))
+
     session = db_service.start_student_session(
         db=db,
         test_id=payload.test_id,
@@ -29,11 +32,14 @@ async def start_session(payload: StartSessionRequest, db: Session = Depends(get_
     )
 
     quota = test.config.question_quota if test.config else 5
+    time_limit = test.config.time_limit_minutes if test.config else None
     return StartSessionResponse(
         session_id=str(session.id),
+        student_id=str(session.student_id),
         test_id=str(test.id),
         subject_name=test.subject_name,
         question_quota=quota,
+        time_limit_minutes=time_limit,
         materials=[
             SessionMaterialSummary(
                 id=str(material.id),

@@ -9,6 +9,7 @@ class IngestionResponse(BaseModel):
     material_id: str
     token_count: int
     duplicate_material: bool
+    time_limit_minutes: Optional[int] = None
 
 
 class AssessmentRequest(BaseModel):
@@ -83,9 +84,11 @@ class SessionMaterialSummary(BaseModel):
 
 class StartSessionResponse(BaseModel):
     session_id: str
+    student_id: str
     test_id: str
     subject_name: str
     question_quota: int
+    time_limit_minutes: Optional[int] = None
     materials: list[SessionMaterialSummary]
 
 
@@ -129,9 +132,3 @@ class GiveUpResponse(BaseModel):
     feedback: str
     uses_remaining: int
     session_stats: GiveUpSessionStats
-
-
-class GiveUpUnavailableResponse(BaseModel):
-    status: str
-    reason: str
-    feedback: str

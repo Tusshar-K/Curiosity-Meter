@@ -51,6 +51,7 @@ class TestConfig(Base):
     test_id = Column(UUID(as_uuid=True), ForeignKey("tests.id", ondelete="CASCADE"), primary_key=True)
     question_quota = Column(Integer, nullable=False, default=5)
     max_marks = Column(Integer, nullable=False, default=50)
+    time_limit_minutes = Column(Integer, nullable=True)  # None = no time limit
 
     test = relationship("Test", back_populates="config")
 

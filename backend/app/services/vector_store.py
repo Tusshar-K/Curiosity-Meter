@@ -5,7 +5,7 @@ vector_store_id is stored in PostgreSQL (test_materials.vector_store_id).
 """
 import logging
 
-from app.services.llm_client import client, CLASSIFIER_MODEL
+from app.services.llm_client import client
 
 log = logging.getLogger(__name__)
 
@@ -18,12 +18,6 @@ async def create_vector_store(name: str) -> str:
     vs = client.vector_stores.create(name=name)
     log.info("Created vector store '%s' → id=%s", name, vs.id)
     return vs.id
-
-
-async def delete_vector_store(vector_store_id: str) -> None:
-    """Deletes a vector store and all its files."""
-    client.vector_stores.delete(vector_store_id)
-    log.info("Deleted vector store id=%s", vector_store_id)
 
 
 async def upload_files_to_vector_store(
@@ -92,69 +86,4 @@ async def upload_files_to_vector_store(
     return total_completed, total_failed
 
 
-async def retrieve_chunks(
-    query: str,
-    vector_store_id: str,
-) -> list[str]:
-    """
-    Retrieves top 3 relevant chunks using OpenAI File Search via the Responses API.
-
-    NOTE: scaffold parameter enrichment is NOT applied here.
-    File Search does not support query injection. The raw query is used directly.
-    previous_scaffold.parameters continue to flow to the evaluator LLM via
-    session state for context continuity — they no longer influence retrieval.
-    """
-    log.info(
-        "File Search query: %.50s | vector_store_id=%s",
-        query,
-        vector_store_id,
-    )
-
-    try:
-        response = client.responses.create(
-            model=CLASSIFIER_MODEL,  # nano — retrieval only, no evaluation
-            input=query,
-            tools=[
-                {
-                    "type": "file_search",
-                    "vector_store_ids": [vector_store_id],
-                    "max_num_results": 3,
-                }
-            ],
-        )
-
-        chunks: list[str] = []
-        output_items = response.output or []
-
-        for item in output_items:
-            # Pattern 1: ResponseFileSearchToolCall — item has .results list
-            results = getattr(item, "results", None)
-            if results:
-                for result in results:
-                    text = getattr(result, "text", None)
-                    if text:
-                        chunks.append(text)
-                continue
-
-            # Pattern 2: message content with file_search annotations
-            content_list = getattr(item, "content", None) or []
-            for block in content_list:
-                annotations = getattr(block, "annotations", None) or []
-                for ann in annotations:
-                    if getattr(ann, "type", "") == "file_citation":
-                        text = getattr(block, "text", None)
-                        if text:
-                            chunks.append(text)
-
-        chunks = chunks[:3]
-        log.info(
-            "File Search retrieved %d chunks — previews: %s",
-            len(chunks),
-            [c[:50] for c in chunks],
-        )
-        return chunks
-
-    except Exception as exc:
-        log.error("File Search retrieval failed: %s", exc)
-        return []
 

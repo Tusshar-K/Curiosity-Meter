@@ -126,11 +126,13 @@ class DBService:
         penalty_off_topic: int,
         penalty_duplicate: int,
         penalty_fixation: int,
+        time_limit_minutes: int | None = None,
     ) -> None:
         if not test.config:
             test.config = TestConfig()
         test.config.question_quota = question_quota
         test.config.max_marks = max_marks
+        test.config.time_limit_minutes = time_limit_minutes if (time_limit_minutes and time_limit_minutes > 0) else None
         db.commit()
 
     def get_vector_store_id(self, db: Session, session: StudentSession) -> str | None:
@@ -224,7 +226,46 @@ class DBService:
         logger.warning("QDRANT_DISABLED: search_vectors called — returning empty list")
         return []
 
-    def delete_test_and_vectors(self, db: Session, test_id: str) -> bool:
+    async def clear_all_question_cache(self) -> int:
+        """Deletes all Redis session/question state keys (new + legacy formats)."""
+        keys: list[str] = []
+
+        async for key in self.redis.scan_iter(match="test:*:session:*:state"):
+            keys.append(key)
+
+        async for key in self.redis.scan_iter(match="session:*:state"):
+            keys.append(key)
+
+        if not keys:
+            return 0
+
+        deleted = await self.redis.delete(*keys)
+        logger.info("Cleared Redis question/session cache keys: %d", deleted)
+        return int(deleted)
+
+    async def clear_test_question_cache(self, test_id: str, session_ids: list[str] | None = None) -> int:
+        """Deletes Redis session/question state keys for a specific test."""
+        keys: list[str] = []
+
+        async for key in self.redis.scan_iter(match=f"test:{test_id}:session:*:state"):
+            keys.append(key)
+
+        if session_ids:
+            for session_id in session_ids:
+                keys.append(self._legacy_session_state_key(session_id))
+
+        if not keys:
+            return 0
+
+        deleted = await self.redis.delete(*keys)
+        logger.info(
+            "Cleared Redis question/session cache for test_id=%s: %d keys",
+            test_id,
+            deleted,
+        )
+        return int(deleted)
+
+    async def delete_test_and_vectors(self, db: Session, test_id: str) -> bool:
         try:
             test_uuid = uuid.UUID(test_id)
         except ValueError:
@@ -234,10 +275,14 @@ class DBService:
         if not test:
             return False
 
+        session_ids = [str(s.id) for s in test.sessions]
         hashes_to_check = [m.content_hash for m in test.materials]
 
         db.delete(test)
         db.commit()
+
+        # Clear Redis session/question cache for this test immediately.
+        await self.clear_test_question_cache(test_id=str(test_uuid), session_ids=session_ids)
 
         # QDRANT_DISABLED: kept for retrieval comparison later
         # if self.qdrant:
@@ -294,13 +339,52 @@ class DBService:
 
     # ── Redis session state ────────────────────────────────────────────────
 
+    @staticmethod
+    def _legacy_session_state_key(session_id: str) -> str:
+        return f"session:{session_id}:state"
+
+    @staticmethod
+    def _test_session_state_key(test_id: str, session_id: str) -> str:
+        return f"test:{test_id}:session:{session_id}:state"
+
+    def get_session_state_key(self, test_id: str, session_id: str) -> str:
+        return self._test_session_state_key(test_id, session_id)
+
+    async def refresh_session_cache_for_test(self, test_id: str) -> None:
+        """
+        Refreshes Redis session cache so only keys for this test remain.
+        This excludes unrelated Redis keys and only targets session-state keys.
+        """
+        keep_prefix = f"test:{test_id}:session:"
+        delete_keys: list[str] = []
+
+        async for key in self.redis.scan_iter(match="test:*:session:*:state"):
+            if not key.startswith(keep_prefix):
+                delete_keys.append(key)
+
+        # Clean up old legacy session keys after moving to test-scoped keys.
+        async for key in self.redis.scan_iter(match="session:*:state"):
+            delete_keys.append(key)
+
+        if delete_keys:
+            await self.redis.delete(*delete_keys)
+            logger.info(
+                "Redis session cache refreshed for test_id=%s; deleted_keys=%d",
+                test_id,
+                len(delete_keys),
+            )
+
     async def get_session_state(
         self,
+        test_id: str,
         session_id: str,
         question_budget: int = 20,
     ) -> dict[str, Any]:
-        key = f"session:{session_id}:state"
+        key = self._test_session_state_key(test_id, session_id)
         data = await self.redis.get(key)
+        if not data:
+            legacy_key = self._legacy_session_state_key(session_id)
+            data = await self.redis.get(legacy_key)
         if data:
             try:
                 state = json.loads(data)
@@ -310,6 +394,7 @@ class DBService:
                 state.setdefault("give_up_uses_remaining", max(1, question_budget // 5))
                 state.setdefault("give_up_cooldown_questions", 0)
                 state.setdefault("give_up_available", False)
+                state.setdefault("test_id", test_id)
                 return state
             except Exception:
                 pass
@@ -317,6 +402,7 @@ class DBService:
         # Default schema — new session
         give_up_uses = max(1, question_budget // 5)
         return {
+            "test_id": test_id,
             "session_id": session_id,
             "student_id": "",
             "current_topic": "",
@@ -334,14 +420,20 @@ class DBService:
             "give_up_available": False,
         }
 
-    async def update_session_state(self, session_id: str, state: dict[str, Any]) -> None:
-        key = f"session:{session_id}:state"
+    async def update_session_state(self, test_id: str, session_id: str, state: dict[str, Any]) -> None:
+        key = self._test_session_state_key(test_id, session_id)
+        state["test_id"] = test_id
         payload = json.dumps(state, ensure_ascii=True)
         await self.redis.set(key, payload, ex=7200)  # 2 hour TTL — refreshed on every write
 
-    async def delete_session_state(self, session_id: str) -> None:
-        key = f"session:{session_id}:state"
+        # Remove legacy key if it exists.
+        legacy_key = self._legacy_session_state_key(session_id)
+        await self.redis.delete(legacy_key)
+
+    async def delete_session_state(self, test_id: str, session_id: str) -> None:
+        key = self._test_session_state_key(test_id, session_id)
         await self.redis.delete(key)
+        await self.redis.delete(self._legacy_session_state_key(session_id))
         logger.info("Deleted Redis session key for session_id=%s", session_id)
 
     # ── Student helpers ────────────────────────────────────────────────────
@@ -541,7 +633,7 @@ class DBService:
         }
 
         # Explicitly delete Redis key (Part 9)
-        await self.delete_session_state(session_id)
+        await self.delete_session_state(str(session.test_id), session_id)
 
         return {
             "avg_relevance": float(avg_relevance),
@@ -592,7 +684,7 @@ class DBService:
         max_marks = session.test.config.max_marks if session.test and session.test.config else 50
         subject_name = session.test.subject_name if session.test else "Unknown"
 
-        await self.delete_session_state(session_id)
+        await self.delete_session_state(str(session.test_id), session_id)
 
         return {
             "session_id": str(session.id),

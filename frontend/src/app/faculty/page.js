@@ -8,6 +8,7 @@ import Button from "@/components/Button";
 const defaultRules = {
 	question_quota: 5,
 	max_marks: 50,
+	time_limit_minutes: 0,
 };
 
 function SoftToggle({ checked, onChange, label }) {
@@ -132,6 +133,7 @@ export default function FacultyPage() {
 			formData.append("subject_name", subjectName.trim());
 			formData.append("question_quota", String(Math.max(1, Number(rules.question_quota) || 5)));
 			formData.append("max_marks", String(Math.max(1, Number(rules.max_marks) || 50)));
+			formData.append("time_limit_minutes", String(Math.max(0, Number(rules.time_limit_minutes) || 0)));
 
 			const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 			const res = await fetch(`${API_BASE}/api/ingest`, {
@@ -267,7 +269,17 @@ export default function FacultyPage() {
 										/>
 									</div>
 
-
+									<div className="space-y-2 md:col-span-2">
+										<label className="text-xs font-medium uppercase tracking-wide text-slate-400">Time Limit (minutes) — 0 = no limit</label>
+										<input
+											type="number"
+											min="0"
+											value={rules.time_limit_minutes}
+											onChange={(e) => updateRule("time_limit_minutes", e.target.value)}
+											className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-cyan-500"
+											placeholder="e.g. 30"
+										/>
+									</div>
 								</div>
 							)}
 						</div>

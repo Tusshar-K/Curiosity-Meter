@@ -1,12 +1,11 @@
 """
-Evaluator service — stateless OpenAI chat completion calls.
-Uses EVALUATOR_MODEL (gpt-5.4-mini) with JSON mode.
+Evaluator service — stateless OpenAI reasoning calls via Responses API.
 """
 import json
 import logging
 from typing import Any
 
-from app.services.llm_client import client, EVALUATOR_MODEL
+from app.services.llm_client import client, EVALUATOR_MODEL, RETRIEVAL_MODEL
 
 log = logging.getLogger(__name__)
 
@@ -548,20 +547,119 @@ def build_fallback_response() -> dict[str, Any]:
         },
     }
 
+def _extract_response_text(response: Any) -> str:
+    """Extracts text content from a Responses API response object."""
+    output_text = getattr(response, "output_text", "") or ""
+    if output_text:
+        return output_text
+
+    fragments: list[str] = []
+    for item in getattr(response, "output", []) or []:
+        content_list = getattr(item, "content", None) or []
+        for block in content_list:
+            text = getattr(block, "text", None)
+            if text:
+                fragments.append(text)
+
+    return "\n".join(fragments).strip()
+
+
+def _parse_json_payload(raw: str) -> dict[str, Any]:
+    """Parses the expected JSON payload, tolerating wrapped content."""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise
+        return json.loads(raw[start : end + 1])
+
+
+async def retrieve_chunks(
+    query: str,
+    vector_store_id: str,
+) -> list[str]:
+    """
+    Retrieves top 3 relevant chunks using OpenAI File Search via the Responses API.
+
+    NOTE: scaffold parameter enrichment is NOT applied here.
+    File Search does not support query injection. The raw query is used directly.
+    previous_scaffold.parameters continue to flow to the evaluator LLM via
+    session state for context continuity — they no longer influence retrieval.
+    """
+    log.info(
+        "File Search query: %.50s | vector_store_id=%s",
+        query,
+        vector_store_id,
+    )
+
+    try:
+        response = client.responses.create(
+        model=RETRIEVAL_MODEL,
+            input=query,
+            tools=[
+                {
+                    "type": "file_search",
+                    "vector_store_ids": [vector_store_id],
+                    "max_num_results": 3,
+                }
+            ],
+        )
+
+        chunks: list[str] = []
+        output_items = response.output or []
+
+        for item in output_items:
+            # Pattern 1: ResponseFileSearchToolCall — item has .results list
+            results = getattr(item, "results", None)
+            if results:
+                for result in results:
+                    text = getattr(result, "text", None)
+                    if text:
+                        chunks.append(text)
+                continue
+
+            # Pattern 2: message content with file_search annotations
+            content_list = getattr(item, "content", None) or []
+            for block in content_list:
+                annotations = getattr(block, "annotations", None) or []
+                for ann in annotations:
+                    if getattr(ann, "type", "") == "file_citation":
+                        text = getattr(block, "text", None)
+                        if text:
+                            chunks.append(text)
+
+        chunks = chunks[:3]
+        log.info(
+            "File Search retrieved %d chunks — previews: %s",
+            len(chunks),
+            [c[:50] for c in chunks],
+        )
+        return chunks
+
+    except Exception as exc:
+        log.error("File Search retrieval failed: %s", exc)
+        return []
+
 
 # ─────────────────────────────────────────────────────────────
 # Main evaluator call
 # ─────────────────────────────────────────────────────────────
 async def call_evaluator(
     student_question: str,
-    chunks: list[str],
+    vector_store_id: str,
     session_state: dict[str, Any],
     skip_bridging_bonus: bool,
 ) -> dict[str, Any]:
     """
-    Calls the evaluator LLM (stateless chat completion).
+    Calls the evaluator LLM (stateless Responses API reasoning call).
     Two attempts with fallback. Logs token usage and raw output on failure.
     """
+    chunks = await retrieve_chunks(
+        query=student_question,
+        vector_store_id=vector_store_id,
+    )
     context_str = "\n".join(f"{i + 1}. {chunk}" for i, chunk in enumerate(chunks))
 
     user_message = (
@@ -581,22 +679,20 @@ async def call_evaluator(
     raw: str = ""
     for attempt in range(2):
         try:
-            response = client.chat.completions.create(
-                model=EVALUATOR_MODEL,
-                temperature=0,
-                response_format={"type": "json_object"},
-                messages=[
+            response = client.responses.create(
+            model=EVALUATOR_MODEL,
+                input=[
                     {"role": "system", "content": EVALUATOR_SYSTEM_PROMPT},
                     {"role": "user", "content": user_message},
                 ],
             )
-            raw = response.choices[0].message.content or ""
+            raw = _extract_response_text(response)
             log.info(
                 "Evaluator raw output (attempt %d): %.200s",
                 attempt + 1,
                 raw,
             )
-            parsed = json.loads(raw)
+            parsed = _parse_json_payload(raw)
 
             # Force bridging_bonus = 0 if skip flag is set
             if skip_bridging_bonus:
